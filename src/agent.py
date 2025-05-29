@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import json
 import logging
+from openai import  AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,13 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_FILE_TYPES = {".txt", ".md", ".rtf"}
 
 
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    logger.warning("OPENAI_API_KEY not found in environment variables")
+
 class ArticleAnalyzer:
     """Service class for analyzing articles using OpenAI API"""
+
     
     @staticmethod
     def create_summary_prompt(text: str) -> str:
@@ -61,10 +67,17 @@ class ArticleAnalyzer:
 
     @staticmethod
     async def analyze_with_openai(text: str) -> dict:
+        openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
         """Analyze text using OpenAI API"""
+        if not openai_client:
+            raise HTTPException(
+                status_code=500,
+                detail="OpenAI client not initialized. Check API key configuration."
+            )
+        
         try:
             # Get summary
-            summary_response = await openai.ChatCompletion.acreate(
+            summary_response = await openai_client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that summarizes articles clearly and concisely."},
@@ -74,10 +87,17 @@ class ArticleAnalyzer:
                 temperature=0.3
             )
             
-            summary = summary_response.choices[0].message.content.strip()
+            # Extract and validate summary
+            summary_content = summary_response.choices[0].message.content
+            if summary_content is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="OpenAI API returned empty summary response"
+                )
+            summary = summary_content.strip()
             
             # Get nationalities
-            nationality_response = await openai.ChatCompletion.acreate(
+            nationality_response = await openai_client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that extracts nationalities and countries from text. Always respond with valid JSON."},
@@ -87,7 +107,13 @@ class ArticleAnalyzer:
                 temperature=0.1
             )
             
-            nationality_text = nationality_response.choices[0].message.content.strip()
+            # Extract and validate nationality response
+            nationality_content = nationality_response.choices[0].message.content
+            if nationality_content is None:
+                logger.warning("OpenAI API returned empty nationality response")
+                nationality_text = "[]"  # Default to empty array
+            else:
+                nationality_text = nationality_content.strip()
             
             # Parse nationalities JSON
             try:
@@ -112,18 +138,16 @@ class ArticleAnalyzer:
 
 async def read_uploaded_file(file: UploadFile) -> str:
     """Read and validate uploaded file"""
-    # Check file size
-    file_size = 0
-    content = b""
+    # Read file content
+    content = await file.read()
+    file_size = len(content)
     
-    async for chunk in file.stream():
-        content += chunk
-        file_size += len(chunk)
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB"
-            )
+    # Check file size
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB"
+        )
     
     # Check file extension
     file_extension = Path(file.filename).suffix.lower() if file.filename else ""
