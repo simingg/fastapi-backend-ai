@@ -6,10 +6,8 @@ import openai
 import os
 from dotenv import load_dotenv
 import logging
-import uvicorn
 from .agents.agent import ArticleAnalyzer, read_uploaded_file
 from .schemas.agent import AnalysisResponse, ErrorResponse
-from pydantic import ValidationError
 from typing import Optional
 # Load environment variables
 load_dotenv()
@@ -129,17 +127,4 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content=error_response.dict()
-    )
-
-
-if __name__ == "__main__":
-    
-    port = int(os.getenv("PORT", "8000"))
-    host = os.getenv("HOST", "0.0.0.0")
-    
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=os.getenv("ENV") == "dev"
     )
