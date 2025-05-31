@@ -1,30 +1,27 @@
 from fastapi import HTTPException, UploadFile
 from pathlib import Path
-import aiofiles
-import openai
 from dotenv import load_dotenv
 import os
 import json
 import logging
-from openai import  AsyncOpenAI
-
+from openai import  AsyncOpenAI, OpenAIError, RateLimitError, APIError
+import re
 logger = logging.getLogger(__name__)
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1500"))
 # Configuration
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_FILE_TYPES = {".txt", ".md", ".rtf"}
+ALLOWED_FILE_TYPES = {".txt", ".docx"}
 
-
-openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    logger.warning("OPENAI_API_KEY not found in environment variables")
 
 class ArticleAnalyzer:
     """Service class for analyzing articles using OpenAI API"""
+    def __init__(self):
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not self.openai_api_key:
+            logger.warning("OPENAI_API_KEY not found in environment variables")
 
-    
     @staticmethod
     def create_summary_prompt(text: str) -> str:
         """Create a well-engineered prompt for article summarization"""
@@ -49,11 +46,11 @@ class ArticleAnalyzer:
         return f"""
             Analyze the following article and extract ALL nationalities, countries, or geographic regions mentioned. 
             Include:
-            - Countries explicitly mentioned
+            - Countries mentioned
             - Nationalities of people mentioned (e.g., "American", "Chinese", "British")
             - Geographic regions that represent nations (e.g., "United States", "United Kingdom")
 
-            Return ONLY a JSON array of strings with the nationalities/countries found. 
+            Return ONLY a JSON array of strings with the nationalities/countries found, without any markdown formatting or code block.
             If none are found, return an empty array [].
             Avoid duplicates and use standard country/nationality names.
 
@@ -65,9 +62,8 @@ class ArticleAnalyzer:
             Nationalities/Countries (JSON array only):
             """
 
-    @staticmethod
-    async def analyze_with_openai(text: str) -> dict:
-        openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
+    async def analyze_with_openai(self, text: str) -> dict:
+        openai_client = AsyncOpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
         """Analyze text using OpenAI API"""
         if not openai_client:
             raise HTTPException(
@@ -109,33 +105,64 @@ class ArticleAnalyzer:
             
             # Extract and validate nationality response
             nationality_content = nationality_response.choices[0].message.content
+            nationality_text = ""
             if nationality_content is None:
                 logger.warning("OpenAI API returned empty nationality response")
                 nationality_text = "[]"  # Default to empty array
             else:
                 nationality_text = nationality_content.strip()
-            
-            # Parse nationalities JSON
-            try:
+                if nationality_text.startswith("```"):
+                    print(nationality_text)
+                    # Split by lines and remove first/last lines if they contain backticks
+                    lines = nationality_text.split('\n')
+                    print(lines)
+                    # Remove first line if it's just backticks/json
+                    if lines[0].strip().startswith('```'):
+                        lines = lines[1:]
+                    # Remove last line if it's just backticks
+                    if lines and lines[-1].strip() == '```':
+                        lines = lines[:-1]
+                    nationality_text = '\n'.join(lines).strip()
+                            # Parse nationalities JSON
+                print(nationality_text)
                 nationalities = json.loads(nationality_text)
+                print(nationalities)
                 if not isinstance(nationalities, list):
                     nationalities = []
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse nationalities JSON: {nationality_text}")
-                nationalities = []
             
             return {
                 "summary": summary,
                 "nationalities": nationalities
             }
-            
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit error: {str(e)}")
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Please try again later."
+            )
+        except APIError as e:
+            logger.error(f"OpenAI API error: {str(e)}")
+            # Extract the actual error message
+            error_message = str(e)
+            if hasattr(e, 'message'):
+                error_message = e.message
+            raise HTTPException(
+                status_code=400,
+                detail=error_message
+            )
+        except OpenAIError as e:
+            logger.error(f"OpenAI service error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI service error: {str(e)}"
+            )           
         except Exception as e:
             logger.error(f"OpenAI API error: {str(e)}")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Failed to analyze article with AI service: {str(e)}"
             )
-
+@staticmethod
 async def read_uploaded_file(file: UploadFile) -> str:
     """Read and validate uploaded file"""
     # Read file content

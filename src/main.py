@@ -1,13 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
 import openai
 import os
 from dotenv import load_dotenv
 import logging
-from pathlib import Path
-import aiofiles
 import uvicorn
-
+from .agents.agent import ArticleAnalyzer, read_uploaded_file
+from .schemas.agent import AnalysisResponse, ErrorResponse
+from pydantic import ValidationError
+from typing import Optional
 # Load environment variables
 load_dotenv()
 
@@ -53,6 +56,81 @@ async def health_check():
         "model": OPENAI_MODEL,
         "max_tokens": MAX_TOKENS
     }
+
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_article(
+    file: Optional[UploadFile] = File(None),
+    text: Optional[str] = Form(None)
+):
+    """
+    Analyze an article to extract summary and nationalities.
+    
+    You can provide either:
+    - A text file upload (txt, md, rtf)
+    - Raw text in the 'text' form field
+    """
+    
+    # Validate input
+    if not file and not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'file' or 'text' parameter must be provided"
+        )  
+    try:
+        # Get article text
+        if file:
+            article_text = await read_uploaded_file(file)
+        else:
+            article_text = text.strip()
+            if not article_text:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Text parameter cannot be empty"
+                )
+        
+        # Validate text length
+        if len(article_text) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Article text is too short (minimum 50 characters)"
+            )
+        
+        if len(article_text) > 50000:  # ~50k chars limit
+            raise HTTPException(
+                status_code=400,
+                detail="Article text is too long (maximum 50,000 characters)"
+            )
+        
+        # Analyze article
+        logger.info(f"Analyzing article of length: {len(article_text)} characters")
+        analysis_result = await ArticleAnalyzer().analyze_with_openai(article_text)
+        
+        return AnalysisResponse(
+            summary=analysis_result["summary"],
+            nationalities=analysis_result["nationalities"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in analyze_article: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while processing your request"
+        )
+
+# Global exception handler for HTTPException
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    error_response = ErrorResponse(
+        error=exc.detail,
+        details=f"HTTP {exc.status_code}"
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response.dict()
+    )
+
 
 if __name__ == "__main__":
     

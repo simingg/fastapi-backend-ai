@@ -1,6 +1,5 @@
-
-from pydantic import BaseModel, ValidationError
-from typing import List, Optional, Union
+from pydantic import BaseModel
+from typing import List, Optional
 
 class AnalysisRequest(BaseModel):
     text: str
