@@ -9,11 +9,16 @@ import logging
 from .agents.agent import ArticleAnalyzer, read_uploaded_file
 from .schemas.agent import AnalysisResponse, ErrorResponse
 from typing import Optional
+import sys
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO,     
+                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                    handlers=[
+                        logging.StreamHandler(sys.stdout)
+                    ])
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
@@ -112,10 +117,7 @@ async def analyze_article(
         raise
     except Exception as e:
         logger.error(f"Unexpected error in analyze_article: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred while processing your request"
-        )
+        raise
 
 # Global exception handler for HTTPException
 @app.exception_handler(HTTPException)
@@ -126,5 +128,5 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_response.dict()
+        content=error_response.model_dump()
     )

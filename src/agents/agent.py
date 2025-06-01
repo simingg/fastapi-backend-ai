@@ -49,8 +49,11 @@ class ArticleAnalyzer:
             - Countries mentioned
             - Nationalities of people mentioned (e.g., "American", "Chinese", "British")
             - Geographic regions that represent nations (e.g., "United States", "United Kingdom")
+            - People mentioned (e.g., "Donald Trump", "Taylor Swift", "Xi Jin Ping")
+            - Organizations mentioned (e.g., "McKinsey", "HSBC", "DBS")
+            )
 
-            Return ONLY a JSON array of strings with the nationalities/countries found, without any markdown formatting or code block.
+            Return ONLY a JSON array of strings with the nationalities/countries/people/organizations found, without any markdown formatting or code block.
             If none are found, return an empty array [].
             Avoid duplicates and use standard country/nationality names.
 
@@ -96,7 +99,7 @@ class ArticleAnalyzer:
             nationality_response = await openai_client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts nationalities and countries from text. Always respond with valid JSON."},
+                    {"role": "system", "content": "You are a helpful assistant that extracts nationalities, countries, people, organizations from text. Always respond with valid JSON."},
                     {"role": "user", "content": ArticleAnalyzer.create_nationality_prompt(text)}
                 ],
                 max_tokens=500,
