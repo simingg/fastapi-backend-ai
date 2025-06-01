@@ -1,11 +1,10 @@
 from fastapi import HTTPException, UploadFile
 from pathlib import Path
-from dotenv import load_dotenv
 import os
 import json
 import logging
 from openai import  AsyncOpenAI, OpenAIError, RateLimitError, APIError
-import re
+import httpx
 logger = logging.getLogger(__name__)
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
@@ -66,7 +65,7 @@ class ArticleAnalyzer:
             """
 
     async def analyze_with_openai(self, text: str) -> dict:
-        openai_client = AsyncOpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
+        openai_client = AsyncOpenAI(api_key=self.openai_api_key, http_client=httpx.AsyncClient()) if self.openai_api_key else None
         """Analyze text using OpenAI API"""
         if not openai_client:
             raise HTTPException(
